@@ -8,7 +8,6 @@ import av
 import tempfile
 from fractions import Fraction
 import base64
-
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from streamlit_autorefresh import st_autorefresh
 
@@ -29,7 +28,7 @@ def load_model():
 model = load_model()
 
 # =====================================================
-# SHARED STATS (PERSISTENT)
+# SHARED STATS
 # =====================================================
 class SharedStats:
     def __init__(self):
@@ -47,7 +46,7 @@ if "stats" not in st.session_state:
 stats = st.session_state.stats
 
 # =====================================================
-# VIDEO PROCESSOR (NO CV2)
+# VIDEO PROCESSOR
 # =====================================================
 class MaskDetectionProcessor:
     def __init__(self, stats):
@@ -154,7 +153,11 @@ elif page == "Image":
     file = st.file_uploader("Upload Image", ["jpg", "jpeg", "png"])
     if file:
         image = Image.open(file).convert("RGB")
-        st.image(image, use_container_width=True)
+
+        # 🔑 Batasi lebar pakai kolom (sama seperti video)
+        left, center, right = st.columns([1, 2, 1])
+        with center:
+            st.image(image, width=360)
 
         if st.button("Detect"):
             img = np.array(image)[:, :, ::-1]
@@ -169,7 +172,11 @@ elif page == "Image":
                 elif name == "Mask_Off":
                     off += 1
 
-            st.image(annotated[:, :, ::-1], use_container_width=True)
+            # 🔑 Tampilkan hasil dengan ukuran yang SAMA
+            left, center, right = st.columns([1, 2, 1])
+            with center:
+                st.image(annotated[:, :, ::-1], width=360)
+
             st.success(f"Total: {on+off} | Mask On: {on} | Mask Off: {off}")
 
 # =====================================================
@@ -290,7 +297,6 @@ elif page == "Video":
                 """
             )
 
-            # 🔽 DOWNLOAD DENGAN NAMA FILE ASLI + _detected
             with open(output_file.name, "rb") as f:
                 st.download_button(
                     label="⬇️ Download Result Video",
