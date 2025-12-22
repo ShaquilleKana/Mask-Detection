@@ -1,7 +1,8 @@
 streamlit
-ultralytics
-Pillow
 streamlit-webrtc
-av
+streamlit-autorefresh
+ultralytics
 numpy
-pandas
+pillow
+av
+opencv-python-headless
