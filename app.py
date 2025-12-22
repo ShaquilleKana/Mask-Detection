@@ -26,7 +26,7 @@ def load_model():
 model = load_model()
 
 # =====================================================
-# SHARED STATS (PERSISTENT !!!)
+# SHARED STATS (PERSISTENT)
 # =====================================================
 class SharedStats:
     def __init__(self):
@@ -41,10 +41,10 @@ class SharedStats:
 if "stats" not in st.session_state:
     st.session_state.stats = SharedStats()
 
-stats = st.session_state.stats   # ⬅️ INI KUNCINYA
+stats = st.session_state.stats
 
 # =====================================================
-# VIDEO PROCESSOR
+# VIDEO PROCESSOR (NO CV2)
 # =====================================================
 class MaskDetectionProcessor:
     def __init__(self, stats):
@@ -53,34 +53,40 @@ class MaskDetectionProcessor:
         self.process_size = (640, 480)
 
     def recv(self, frame):
+        # Frame → numpy
         img = frame.to_ndarray(format="bgr24")
-        
+
+        # Resize pakai PIL (AMAN DEPLOY)
         pil_img = Image.fromarray(img)
         pil_resized = pil_img.resize(self.process_size)
         img_resized = np.array(pil_resized)
 
+        # YOLO inference
         results = model.predict(
             img_resized,
             conf=self.confidence,
             verbose=False
         )
 
+        # Annotated image (YOLO internal)
         annotated = results[0].plot()
+
+        # Resize balik ke ukuran asli
         annotated_pil = Image.fromarray(annotated)
         annotated_pil = annotated_pil.resize((img.shape[1], img.shape[0]))
         annotated = np.array(annotated_pil)
 
+        # Hitung deteksi
         mask_on = 0
         mask_off = 0
         for box in results[0].boxes:
-            cls = int(box.cls[0])
-            name = model.names[cls]
+            name = model.names[int(box.cls[0])]
             if name == "Mask_On":
                 mask_on += 1
             elif name == "Mask_Off":
                 mask_off += 1
 
-        # 🔒 UPDATE STATS YANG TIDAK RESET
+        # Update stats (THREAD SAFE)
         with self.stats.lock:
             self.stats.mask_on = mask_on
             self.stats.mask_off = mask_off
@@ -108,7 +114,7 @@ confidence = st.sidebar.slider("Confidence", 0.1, 1.0, 0.5)
 if page == "Realtime":
     st.title("📹 Real-Time Mask Detection")
 
-    # 🔥 PAKSA RERUN UI
+    # Paksa UI rerun
     st_autorefresh(interval=500, key="refresh")
 
     col1, col2 = st.columns([2, 1])
@@ -130,7 +136,6 @@ if page == "Realtime":
 
     with col2:
         st.subheader("📊 Statistics")
-
         with stats.lock:
             st.metric("FPS", f"{stats.fps:.1f}")
             st.metric("Total People", stats.total)
@@ -142,8 +147,8 @@ if page == "Realtime":
 # =====================================================
 else:
     st.title("🖼️ Image Detection")
-    file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
 
+    file = st.file_uploader("Upload Image", ["jpg", "jpeg", "png"])
     if file:
         image = Image.open(file).convert("RGB")
         st.image(image, use_container_width=True)
