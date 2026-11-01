@@ -4,12 +4,20 @@ import numpy as np
 from PIL import Image
 import time
 import threading
+import logging
 import av
 import tempfile
 from fractions import Fraction
 import base64
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
-from streamlit_autorefresh import st_autorefresh
+from streamlit_webrtc import (
+    RTCConfiguration,
+    VideoProcessorBase,
+    WebRtcMode,
+    webrtc_streamer,
+)
+
+logger = logging.getLogger(__name__)
+logging.getLogger("streamlit_webrtc.webrtc").setLevel(logging.DEBUG)
 
 # =====================================================
 # PAGE CONFIG
@@ -48,13 +56,20 @@ stats = st.session_state.stats
 # =====================================================
 # VIDEO PROCESSOR
 # =====================================================
-class MaskDetectionProcessor:
+class MaskDetectionProcessor(VideoProcessorBase):
     def __init__(self, stats):
         self.stats = stats
         self.confidence = 0.5
         self.process_size = (640, 480)
+        self._logged_first_frame = False
+        self._ended = False
+        logger.info("Webcam video processor initialized")
 
     def recv(self, frame):
+        if not self._logged_first_frame:
+            logger.info("Webcam video processing started")
+            self._logged_first_frame = True
+
         # Frame → numpy
         img = frame.to_ndarray(format="bgr24")
 
@@ -103,6 +118,42 @@ class MaskDetectionProcessor:
 
         return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
+    def on_ended(self):
+        if self._ended:
+            return
+
+        self._ended = True
+        with self.stats.lock:
+            self.stats.mask_on = 0
+            self.stats.mask_off = 0
+            self.stats.total = 0
+            self.stats.fps = 0.0
+            self.stats._frames = 0
+            self.stats._last_time = time.time()
+        logger.info("Webcam video processor stopped; session statistics reset")
+
+
+@st.fragment(run_every="1s")
+def render_realtime_stats():
+    st.subheader("📊 Statistics")
+    with stats.lock:
+        st.metric("FPS", f"{stats.fps:.1f}")
+        st.metric("Total People", stats.total)
+        st.metric("Mask On", stats.mask_on)
+        st.metric("Mask Off", stats.mask_off)
+
+
+def log_webrtc_state_change():
+    context = st.session_state.get("mask")
+    if context is not None:
+        state = context.state
+        logger.info(
+            "WebRTC component state changed: playing=%s signalling=%s",
+            state.playing,
+            state.signalling,
+        )
+
+
 # =====================================================
 # SIDEBAR
 # =====================================================
@@ -116,9 +167,6 @@ confidence = st.sidebar.slider("Confidence", 0.1, 1.0, 0.5)
 if page == "Realtime":
     st.title("📹 Real-Time Mask Detection")
 
-    # Paksa UI rerun
-    st_autorefresh(interval=500, key="refresh")
-
     col1, col2 = st.columns([2, 1])
 
     with col1:
@@ -131,18 +179,14 @@ if page == "Realtime":
             video_processor_factory=lambda: MaskDetectionProcessor(stats),
             media_stream_constraints={"video": True, "audio": False},
             async_processing=True,
+            on_change=log_webrtc_state_change,
         )
 
         if ctx.video_processor:
             ctx.video_processor.confidence = confidence
 
     with col2:
-        st.subheader("📊 Statistics")
-        with stats.lock:
-            st.metric("FPS", f"{stats.fps:.1f}")
-            st.metric("Total People", stats.total)
-            st.metric("Mask On", stats.mask_on)
-            st.metric("Mask Off", stats.mask_off)
+        render_realtime_stats()
 
 # =====================================================
 # IMAGE PAGE
@@ -304,5 +348,4 @@ elif page == "Video":
                     file_name=output_filename,
                     mime="video/mp4"
                 )
-
 
